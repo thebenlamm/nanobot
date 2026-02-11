@@ -24,9 +24,6 @@ export interface InboundMessage {
   content: string;
   timestamp: number;
   isGroup: boolean;
-  fromMe: boolean;
-  participant: string;
-  pushName: string;
 }
 
 export interface WhatsAppClientOptions {
@@ -113,6 +110,9 @@ export class WhatsAppClient {
       if (type !== 'notify') return;
 
       for (const msg of messages) {
+        // Skip own messages
+        if (msg.key.fromMe) continue;
+
         // Skip status updates
         if (msg.key.remoteJid === 'status@broadcast') continue;
 
@@ -128,9 +128,6 @@ export class WhatsAppClient {
           content,
           timestamp: msg.messageTimestamp as number,
           isGroup,
-          fromMe: msg.key.fromMe || false,
-          participant: msg.key.participant || '',
-          pushName: msg.pushName || '',
         });
       }
     });
