@@ -10,6 +10,7 @@ class WhatsAppConfig(BaseModel):
     enabled: bool = False
     bridge_url: str = "ws://localhost:3001"
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    monitor_groups: list[str] = Field(default_factory=list)  # Group JIDs to log for daily digests (empty = log all)
 
 
 class TelegramConfig(BaseModel):

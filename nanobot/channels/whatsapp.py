@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -11,22 +13,29 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import WhatsAppConfig
 
+# Directory for storing monitored group message logs
+GROUP_LOG_DIR = Path.home() / ".nanobot" / "group-logs"
+
 
 class WhatsAppChannel(BaseChannel):
     """
     WhatsApp channel that connects to a Node.js bridge.
-    
+
     The bridge uses @whiskeysockets/baileys to handle the WhatsApp Web protocol.
     Communication between Python and Node.js is via WebSocket.
+
+    Group messages from monitored groups are logged silently for daily digests.
+    The bot never responds in group chats.
     """
-    
+
     name = "whatsapp"
-    
+
     def __init__(self, config: WhatsAppConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: WhatsAppConfig = config
         self._ws = None
         self._connected = False
+        GROUP_LOG_DIR.mkdir(parents=True, exist_ok=True)
     
     async def start(self) -> None:
         """Start the WhatsApp channel by connecting to the bridge."""
@@ -111,6 +120,15 @@ class WhatsAppChannel(BaseChannel):
             sender_id = user_id.split("@")[0] if "@" in user_id else user_id
             logger.info(f"Sender {sender}")
             
+            # Group messages: log silently for digests, never respond
+            if data.get("isGroup", False):
+                group_jid = data.get("sender", "")
+                monitored = self.config.monitor_groups
+                # If monitor list is empty, log all groups; otherwise only monitored ones
+                if not monitored or group_jid in monitored:
+                    self._log_group_message(data)
+                return
+
             # Handle voice transcription if it's a voice message
             if content == "[Voice Message]":
                 logger.info(f"Voice message received from {sender_id}, but direct download from bridge is not yet supported.")
@@ -143,3 +161,28 @@ class WhatsAppChannel(BaseChannel):
         
         elif msg_type == "error":
             logger.error(f"WhatsApp bridge error: {data.get('error')}")
+
+    def _log_group_message(self, data: dict) -> None:
+        """Log a group message to disk for daily digest summaries."""
+        group_jid = data.get("sender", "unknown")
+        content = data.get("content", "")
+        timestamp = data.get("timestamp", 0)
+        pn = data.get("pn", "")
+
+        # Use date-based log files per group: group-logs/<group_jid>/2026-02-10.jsonl
+        group_dir = GROUP_LOG_DIR / group_jid.replace("@", "_at_")
+        group_dir.mkdir(parents=True, exist_ok=True)
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        log_file = group_dir / f"{today}.jsonl"
+
+        entry = {
+            "ts": timestamp,
+            "sender": pn,
+            "content": content,
+        }
+
+        with open(log_file, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
+        logger.debug(f"Logged group message from {group_jid}")
