@@ -15,8 +15,6 @@ from nanobot.config.schema import WhatsAppConfig
 
 # Directory for storing monitored group message logs
 GROUP_LOG_DIR = Path.home() / ".nanobot" / "group-logs"
-# Directory for storing DM conversation logs
-DM_LOG_DIR = Path.home() / ".nanobot" / "dm-logs"
 
 
 class WhatsAppChannel(BaseChannel):
@@ -38,8 +36,6 @@ class WhatsAppChannel(BaseChannel):
         self._ws = None
         self._connected = False
         GROUP_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        if self.config.log_dms:
-            DM_LOG_DIR.mkdir(parents=True, exist_ok=True)
     
     async def start(self) -> None:
         """Start the WhatsApp channel by connecting to the bridge."""
@@ -115,16 +111,15 @@ class WhatsAppChannel(BaseChannel):
             # Incoming message from WhatsApp
             # Deprecated by whatsapp: old phone number style typically: <phone>@s.whatspp.net
             pn = data.get("pn", "")
-            # New LID sytle typically:
+            # New LID sytle typically: 
             sender = data.get("sender", "")
             content = data.get("content", "")
-            from_me = data.get("fromMe", False)
-
+            
             # Extract just the phone number or lid as chat_id
             user_id = pn if pn else sender
             sender_id = user_id.split("@")[0] if "@" in user_id else user_id
-            logger.info(f"Sender {sender} fromMe={from_me}")
-
+            logger.info(f"Sender {sender}")
+            
             # Group messages: log silently for digests, never respond
             if data.get("isGroup", False):
                 group_jid = data.get("sender", "")
@@ -134,19 +129,11 @@ class WhatsAppChannel(BaseChannel):
                     self._log_group_message(data)
                 return
 
-            # DM messages: log if enabled
-            if self.config.log_dms:
-                self._log_dm_message(data)
-
-            # Own messages: log only, never enter agent loop
-            if from_me:
-                return
-
             # Handle voice transcription if it's a voice message
             if content == "[Voice Message]":
                 logger.info(f"Voice message received from {sender_id}, but direct download from bridge is not yet supported.")
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
-
+            
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender,  # Use full LID for replies
@@ -180,9 +167,7 @@ class WhatsAppChannel(BaseChannel):
         group_jid = data.get("sender", "unknown")
         content = data.get("content", "")
         timestamp = data.get("timestamp", 0)
-        participant = data.get("participant", "")
-        push_name = data.get("pushName", "")
-        from_me = data.get("fromMe", False)
+        pn = data.get("pn", "")
 
         # Use date-based log files per group: group-logs/<group_jid>/2026-02-10.jsonl
         group_dir = GROUP_LOG_DIR / group_jid.replace("@", "_at_")
@@ -193,41 +178,11 @@ class WhatsAppChannel(BaseChannel):
 
         entry = {
             "ts": timestamp,
-            "sender": "me" if from_me else participant,
-            "push_name": "Me" if from_me else push_name,
+            "sender": pn,
             "content": content,
-            "from_me": from_me,
         }
 
         with open(log_file, "a") as f:
             f.write(json.dumps(entry) + "\n")
 
         logger.debug(f"Logged group message from {group_jid}")
-
-    def _log_dm_message(self, data: dict) -> None:
-        """Log a DM message to disk for conversation summaries."""
-        sender = data.get("sender", "unknown")
-        content = data.get("content", "")
-        timestamp = data.get("timestamp", 0)
-        push_name = data.get("pushName", "")
-        from_me = data.get("fromMe", False)
-
-        # Use date-based log files per contact: dm-logs/<contact_jid>/2026-02-10.jsonl
-        contact_dir = DM_LOG_DIR / sender.replace("@", "_at_")
-        contact_dir.mkdir(parents=True, exist_ok=True)
-
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        log_file = contact_dir / f"{today}.jsonl"
-
-        entry = {
-            "ts": timestamp,
-            "sender": "me" if from_me else sender,
-            "push_name": "Me" if from_me else push_name,
-            "content": content,
-            "from_me": from_me,
-        }
-
-        with open(log_file, "a") as f:
-            f.write(json.dumps(entry) + "\n")
-
-        logger.debug(f"Logged DM message {'to' if from_me else 'from'} {sender}")

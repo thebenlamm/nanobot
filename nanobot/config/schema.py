@@ -11,7 +11,6 @@ class WhatsAppConfig(BaseModel):
     bridge_url: str = "ws://localhost:3001"
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
     monitor_groups: list[str] = Field(default_factory=list)  # Group JIDs to log for daily digests (empty = log all)
-    log_dms: bool = True  # Log DM conversations to ~/.nanobot/dm-logs/
 
 
 class TelegramConfig(BaseModel):
